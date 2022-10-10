@@ -30,6 +30,86 @@ type fetchState struct {
 	fetched map[string]bool
 }
 
+func ConcurrentMutex(url string, fetcher Fetcher, f *fetchState) {
+	f.mu.Lock()
+	already := f.fetched[url]
+	f.fetched[url] = true
+	f.mu.Unlock()
+	if already {
+		return
+	}
+
+	urls, err := fetcher.Fetch(url)
+	if err != nil {
+		return
+	}
+	var done sync.WaitGroup
+	for _, u := range urls {
+		done.Add(1)
+		go func(u string) {
+			defer done.Done()
+			ConcurrentMutex(u, fetcher, f)
+		}(u)
+	}
+	done.Wait()
+	return
+}
+
+func makeState() *fetchState {
+	f := &fetchState{}
+	f.fetched = make(map[string]bool)
+	return f
+
+}
+
+// Concurrent crawler wuth channels
+func worker(url string, ch chan []string, fetcher Fetcher) {
+	urls, err := fetcher.Fetch(url)
+	if err != nil {
+		ch <- []string{}
+	} else {
+		ch <- urls
+	}
+}
+
+func coordinator(ch chan []string, fetcher Fetcher) {
+	n := 1
+	fetched := make(map[string]bool)
+	for urls := range ch {
+		for _, u := range urls {
+			if fetched[u] == false {
+				fetched[u] = true
+				n += 1
+				go worker(u, ch, fetcher)
+			}
+		}
+		n -= 1
+		if n == 0 {
+			break
+		}
+	}
+}
+
+func ConcurrentChannel(url string, fetcher Fetcher) {
+	ch := make(chan []string)
+	go func() {
+		ch <- []string{url}
+	}()
+	coordinator(ch, fetcher)
+}
+
+// main
+func main() {
+	fmt.Printf("=== Serial===\n")
+	Serial("http://golang.org/", fetcher, make(map[string]bool))
+
+	fmt.Printf("=== ConcurrentMutex ===\n")
+	ConcurrentMutex("http://golang.org/", fetcher, makeState())
+
+	fmt.Printf("=== ConcurrentChannel ===\n")
+	ConcurrentChannel("http://golang.org/", fetcher)
+}
+
 // Fetcher
 type Fetcher interface {
 	// Fetch returns a slice of URLs found on the page.
