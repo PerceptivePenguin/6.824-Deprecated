@@ -1,2 +1,2 @@
-# 6.824
+# (Deprecated) 6.824
 Codes for MIT 6.824 Distributed Systems Class
